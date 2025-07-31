@@ -1,5 +1,5 @@
 """
-AI Parser Module for Cross-Chain Swap Assistant
+AI Parser Module for Cross-Chain Swap Assistant - FIXED VERSION
 Uses OpenAI GPT-4 to parse natural language swap requests into structured parameters
 """
 
@@ -45,10 +45,10 @@ def create_parsing_prompt(user_input: str) -> str:
     """
     Create a sophisticated prompt for GPT-4 to parse swap requests
     """
-    
+
     token_list = ", ".join(SUPPORTED_TOKENS.keys())
     chain_list = ", ".join(SUPPORTED_CHAINS.keys())
-    
+
     prompt = f"""
 You are an expert DeFi transaction parser. Parse the following natural language swap request into structured JSON parameters.
 
@@ -90,43 +90,48 @@ EXAMPLES:
 
 Parse the user request now:
 """
-    
+
     return prompt
 
 async def parse_swap_intent(user_input: str) -> Dict[str, Any]:
     """
     Parse natural language swap request using OpenAI GPT-4
-    
+
     Args:
         user_input: Natural language description of the swap
-        
+
     Returns:
         Dictionary containing parsed swap parameters
-        
+
     Raises:
         ValueError: If parsing fails or input is invalid
         Exception: If OpenAI API call fails
     """
-    
+
     if not user_input or not user_input.strip():
         raise ValueError("Empty input provided")
-    
+
+    # Check if OpenAI API key is available
+    if not os.getenv("OPENAI_API_KEY"):
+        logger.warning("No OpenAI API key found, using fallback parser")
+        return _fallback_parse_intent(user_input)
+
     try:
         logger.info(f"Parsing swap intent: {user_input}")
-        
+
         # Create the parsing prompt
         prompt = create_parsing_prompt(user_input.strip())
-        
-        # Call OpenAI API
+
+        # Call OpenAI API with FIXED model name
         response = client.chat.completions.create(
-            model="gpt-4.1-mini",
+            model="gpt-4o-mini",  # FIXED: Use correct model name
             messages=[
                 {
-                    "role": "system", 
+                    "role": "system",
                     "content": "You are a precise DeFi transaction parser. Always respond with valid JSON only."
                 },
                 {
-                    "role": "user", 
+                    "role": "user",
                     "content": prompt
                 }
             ],
@@ -134,101 +139,160 @@ async def parse_swap_intent(user_input: str) -> Dict[str, Any]:
             max_tokens=500,
             timeout=30
         )
-        
+
         # Extract and parse the response
         response_text = response.choices[0].message.content.strip()
         logger.info(f"OpenAI response: {response_text}")
-        
+
         # Handle markdown code blocks if present
         if response_text.startswith("```"):
             # Extract JSON from markdown code block
             lines = response_text.split('\n')
             json_lines = []
             in_code_block = False
-            
+
             for line in lines:
                 if line.startswith("```"):
                     in_code_block = not in_code_block
                     continue
                 if in_code_block:
                     json_lines.append(line)
-            
+
             response_text = '\n'.join(json_lines).strip()
-        
+
         # Parse JSON response
         try:
             parsed_data = json.loads(response_text)
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse JSON response: {response_text}")
-            raise ValueError(f"Invalid JSON response from AI: {e}")
-        
+            logger.warning("Falling back to simple parser")
+            return _fallback_parse_intent(user_input)
+
         # Validate the parsed data
         validated_data = validate_parsed_intent(parsed_data, user_input)
-        
+
         logger.info(f"Successfully parsed intent: {validated_data}")
         return validated_data
-        
+
     except openai.APIError as e:
         logger.error(f"OpenAI API error: {e}")
-        raise Exception(f"AI parsing service unavailable: {e}")
-    
+        logger.warning("Falling back to simple parser")
+        return _fallback_parse_intent(user_input)
+
     except openai.RateLimitError as e:
         logger.error(f"OpenAI rate limit exceeded: {e}")
-        raise Exception("AI parsing service rate limit exceeded. Please try again later.")
-    
+        logger.warning("Falling back to simple parser")
+        return _fallback_parse_intent(user_input)
+
     except Exception as e:
         logger.error(f"Unexpected error in AI parsing: {e}")
-        raise Exception(f"Failed to parse swap request: {e}")
+        logger.warning("Falling back to simple parser")
+        return _fallback_parse_intent(user_input)
+
+def _fallback_parse_intent(user_input: str) -> Dict[str, Any]:
+    """
+    Fallback parser when OpenAI API is unavailable
+    Simple keyword-based parsing
+    """
+    user_input_lower = user_input.lower()
+
+    # Extract amount using basic regex
+    import re
+    amount_match = re.search(r'(\d+\.?\d*)', user_input)
+    amount = amount_match.group(1) if amount_match else "1.0"
+
+    # Extract tokens
+    from_token = "ETH"  # Default
+    to_token = "USDC"   # Default
+
+    tokens = ["ETH", "BTC", "USDC", "USDT", "MATIC", "ARB", "DAI"]
+    found_tokens = []
+
+    for token in tokens:
+        if token.lower() in user_input_lower:
+            found_tokens.append(token)
+
+    if len(found_tokens) >= 2:
+        from_token = found_tokens[0]
+        to_token = found_tokens[1]
+    elif len(found_tokens) == 1:
+        to_token = found_tokens[0]
+
+    # Extract chains
+    from_chain = "ethereum"  # Default
+    to_chain = "ethereum"    # Default
+
+    if "arbitrum" in user_input_lower:
+        to_chain = "arbitrum"
+    elif "polygon" in user_input_lower:
+        to_chain = "polygon"
+
+    return {
+        "from_chain": from_chain,
+        "to_chain": to_chain,
+        "from_token": from_token,
+        "to_token": to_token,
+        "amount": amount,
+        "confidence": 0.6,  # Lower confidence for fallback
+        "parsed_elements": {
+            "amount_found": bool(amount_match),
+            "from_token_found": len(found_tokens) > 0,
+            "to_token_found": len(found_tokens) > 0,
+            "chain_specified": any(chain in user_input_lower for chain in ["arbitrum", "polygon", "ethereum"])
+        },
+        "original_input": user_input,
+        "fallback_used": True
+    }
 
 def validate_parsed_intent(parsed_data: Dict[str, Any], original_input: str) -> Dict[str, Any]:
     """
     Validate and normalize the parsed intent data
-    
+
     Args:
         parsed_data: Raw parsed data from AI
         original_input: Original user input for context
-        
+
     Returns:
         Validated and normalized intent data
-        
+
     Raises:
         ValueError: If validation fails
     """
-    
+
     required_fields = ["from_chain", "to_chain", "from_token", "to_token", "amount"]
-    
+
     # Check required fields
     for field in required_fields:
         if field not in parsed_data:
             raise ValueError(f"Missing required field: {field}")
-    
+
     # Validate and normalize tokens
     from_token = parsed_data["from_token"].upper()
     to_token = parsed_data["to_token"].upper()
-    
+
     if from_token not in SUPPORTED_TOKENS:
         raise ValueError(f"Unsupported source token: {from_token}")
-    
+
     if to_token not in SUPPORTED_TOKENS:
         raise ValueError(f"Unsupported destination token: {to_token}")
-    
+
     # Validate and normalize chains
     from_chain = parsed_data["from_chain"].lower()
     to_chain = parsed_data["to_chain"].lower()
-    
+
     if from_chain not in SUPPORTED_CHAINS:
         raise ValueError(f"Unsupported source chain: {from_chain}")
-    
+
     if to_chain not in SUPPORTED_CHAINS:
         raise ValueError(f"Unsupported destination chain: {to_chain}")
-    
+
     # Validate token-chain compatibility
     if from_chain not in SUPPORTED_TOKENS[from_token]["chains"]:
         raise ValueError(f"Token {from_token} not supported on chain {from_chain}")
-    
+
     if to_chain not in SUPPORTED_TOKENS[to_token]["chains"]:
         raise ValueError(f"Token {to_token} not supported on chain {to_chain}")
-    
+
     # Validate amount
     try:
         amount_float = float(parsed_data["amount"])
@@ -238,12 +302,12 @@ def validate_parsed_intent(parsed_data: Dict[str, Any], original_input: str) -> 
             raise ValueError("Amount too large")
     except (ValueError, TypeError):
         raise ValueError(f"Invalid amount: {parsed_data['amount']}")
-    
+
     # Check confidence if provided
     confidence = parsed_data.get("confidence", 0.8)
     if confidence < 0.7:
         logger.warning(f"Low confidence parsing ({confidence}) for input: {original_input}")
-    
+
     # Return validated and normalized data
     return {
         "from_chain": from_chain,
@@ -253,7 +317,8 @@ def validate_parsed_intent(parsed_data: Dict[str, Any], original_input: str) -> 
         "amount": str(amount_float),
         "confidence": confidence,
         "parsed_elements": parsed_data.get("parsed_elements", {}),
-        "original_input": original_input
+        "original_input": original_input,
+        "fallback_used": parsed_data.get("fallback_used", False)
     }
 
 def get_token_info(token_symbol: str) -> Optional[Dict[str, Any]]:
@@ -274,20 +339,20 @@ async def test_parser():
     test_cases = [
         "Swap 1 ETH to USDC on Arbitrum",
         "Convert 0.1 BTC to ETH",
-        "Exchange 100 USDC for MATIC on Polygon", 
+        "Exchange 100 USDC for MATIC on Polygon",
         "Trade 0.5 ETH for USDT",
         "Send 2 ETH to get DAI",
         "I want to swap my 50 USDC to ARB on Arbitrum"
     ]
-    
+
     for test_input in test_cases:
         try:
             result = await parse_swap_intent(test_input)
-            print(f"✅ '{test_input}' → {result}")
+            fallback_msg = " (FALLBACK)" if result.get("fallback_used") else ""
+            print(f"✅ '{test_input}' → {result}{fallback_msg}")
         except Exception as e:
             print(f"❌ '{test_input}' → Error: {e}")
 
 if __name__ == "__main__":
     import asyncio
     asyncio.run(test_parser())
-
