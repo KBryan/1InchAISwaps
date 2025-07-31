@@ -77,6 +77,7 @@ class SimpleWallet:
         # Web3 connections cache
         self._web3_connections: Dict[str, Web3] = {}
 
+
     def get_web3_connection(self, chain: str) -> Web3:
         """
         Get Web3 connection for a specific chain
@@ -123,6 +124,8 @@ class SimpleWallet:
 
         return self._web3_connections[chain_lower]
 
+
+
     def sign_transaction(self, chain: str, transaction_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Sign a transaction - FIXED VERSION
@@ -146,9 +149,9 @@ class SimpleWallet:
             # Prepare transaction with proper values
             tx_params = {
                 'nonce': nonce,
-                'to': transaction_data['to'],
+                'to': w3.to_checksum_address(transaction_data['to']),
                 'value': self._parse_value(transaction_data.get('value', '0')),
-                'gas': self._parse_gas(transaction_data.get('gas', '250000')),
+                'gas': max(250000, self._parse_gas(transaction_data.get('gas', '250000'))),
                 'gasPrice': self._parse_gas_price(transaction_data.get('gasPrice', '20000000000')),
                 'data': transaction_data.get('data', '0x'),
                 'chainId': CHAIN_IDS.get(chain.lower(), 1)
