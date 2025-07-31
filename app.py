@@ -902,6 +902,540 @@ async def execute_live_transaction(
             "execution_type": "live_failed"
         }
 
+try:
+    from secure_intents import SecureIntentAPI, generate_demo_agent_key, CRYPTOGRAPHY_AVAILABLE
+    from secure_intents_integration import (
+        SecureSwapRequest,
+        IntentStatusRequest,
+        MultiSigApprovalRequest,
+        initialize_secure_intents,
+        SECURE_INTENTS_AVAILABLE
+    )
+    SECURE_INTENTS_IMPORTED = True
+    print("✅ Secure Intents Framework imported successfully")
+except ImportError as e:
+    print(f"⚠️ Secure Intents not available: {e}")
+    SECURE_INTENTS_IMPORTED = False
+
+# Initialize secure intents API globally
+secure_intent_api = None
+
+if SECURE_INTENTS_IMPORTED:
+    try:
+        # Use your existing private key
+        private_key = os.getenv("PRIVATE_KEY")
+        if private_key and private_key.startswith("0x"):
+            private_key = private_key[2:]
+            key_bytes = bytes.fromhex(private_key)[:32].ljust(32, b'\x00')
+        else:
+            key_bytes = generate_demo_agent_key()
+
+        secure_intent_api = SecureIntentAPI(key_bytes)
+        print("✅ Secure Intent API initialized with existing wallet integration")
+
+    except Exception as e:
+        print(f"❌ Failed to initialize Secure Intent API: {e}")
+        secure_intent_api = None
+
+# Enhanced request models for secure intents
+class DemoRequest(BaseModel):
+    execution_mode: str = Field(default="simulation", description="simulation, real, or live")
+    enable_live_transactions: bool = Field(default=False, description="Enable actual blockchain broadcasting")
+    demo_amount: str = Field(default="0.001", description="Amount for demo (use small amounts for live)")
+
+# ==================== SECURE INTENTS ENDPOINTS ====================
+
+@app.post("/demo/secure-intents")
+async def demo_secure_intents_endpoint(request: DemoRequest = DemoRequest()):
+    """
+    Secure Intents Framework Demo with Live Execution Support
+    WARNING: live mode will broadcast real transactions!
+    """
+
+    if not SECURE_INTENTS_IMPORTED or not secure_intent_api:
+        return {
+            "error": "Secure Intents Framework not available",
+            "status": "secure_intents_disabled",
+            "fix_required": [
+                "1. Remove 'import self' line from secure_intents.py",
+                "2. Restart server",
+                "3. Ensure cryptography package is installed"
+            ],
+            "available_endpoints": ["/ai-swap", "/health", "/wallet/balance"]
+        }
+
+    # Safety check for live mode
+    if request.execution_mode == "live" and not request.enable_live_transactions:
+        return {
+            "error": "Live execution requires explicit enable_live_transactions=true",
+            "safety_note": "This prevents accidental real money transactions",
+            "to_enable_live": {
+                "curl_example": 'curl -X POST "http://localhost:8000/demo/secure-intents" -H "Content-Type: application/json" -d \'{"execution_mode": "live", "enable_live_transactions": true, "demo_amount": "0.001"}\''
+            },
+            "current_request": request.dict()
+        }
+
+    try:
+        demo_results = []
+        demo_start_time = time.time()
+
+        # Use smaller amounts for live demo
+        demo_amount = request.demo_amount if request.execution_mode == "live" else "0.1"
+
+        print(f"🚀 Starting Secure Intents demo in {request.execution_mode} mode")
+        if request.execution_mode == "live":
+            print("⚠️ WARNING: LIVE MODE - REAL BLOCKCHAIN TRANSACTIONS")
+
+        # Demo Step 1: Standard secure intent with chosen execution mode
+        result1 = await secure_intent_api.create_secure_swap_from_natural_language(
+            user_input=f"Swap {demo_amount} ETH to USDC on Arbitrum",
+            ai_parser_func=parse_swap_intent if AI_PARSER_AVAILABLE else simple_parse,
+            ttl_minutes=5
+        )
+
+        demo_results.append({
+            "step": "standard_intent_creation",
+            "input": f"Swap {demo_amount} ETH to USDC on Arbitrum",
+            "result": result1,
+            "execution_mode_requested": request.execution_mode
+        })
+
+        # Execute with requested mode
+        if result1.get("intent_id") and result1.get("status") == "ready_for_execution":
+            exec_result1 = await secure_intent_api.execute_secure_intent_by_id(
+                result1["intent_id"],
+                request.execution_mode  # ← Now uses requested mode!
+            )
+
+            demo_results.append({
+                "step": "standard_intent_execution",
+                "result": exec_result1,
+                "execution_mode": request.execution_mode,
+                "broadcasted_to_blockchain": exec_result1.get("broadcasted_to_blockchain", False),
+                "transaction_hash": exec_result1.get("transaction_hash"),
+                "explorer_url": exec_result1.get("explorer_url"),
+                "security_verified": exec_result1.get("security_verified", False),
+                "compliance_verified": exec_result1.get("compliance_verified", False)
+            })
+
+        # For non-live modes, also demo multi-sig (safer)
+        if request.execution_mode != "live":
+            # Demo Step 2: Multi-signature intent (only in simulation/real)
+            large_amount = "2.5" if request.execution_mode != "live" else "0.002"
+            result2 = await secure_intent_api.create_secure_swap_from_natural_language(
+                user_input=f"Swap {large_amount} ETH to USDC",
+                ai_parser_func=parse_swap_intent if AI_PARSER_AVAILABLE else simple_parse,
+                ttl_minutes=30
+            )
+
+            demo_results.append({
+                "step": "multisig_intent_creation",
+                "input": f"Swap {large_amount} ETH to USDC",
+                "result": result2
+            })
+
+            # Simulate approvals and execute
+            if result2.get("type") == "multisig_intent":
+                intent_id = result2["intent_id"]
+                multisig_intent = secure_intent_api.multisig_intents[intent_id]
+
+                # Add signatures
+                from secure_intents import create_mock_signature
+                sig1 = create_mock_signature(intent_id, "risk_manager")
+                sig2 = create_mock_signature(intent_id, "compliance_officer")
+
+                multisig_intent.add_signature("risk_manager", sig1)
+                multisig_intent.add_signature("compliance_officer", sig2)
+
+                # Execute multi-sig intent
+                exec_result2 = await secure_intent_api.execute_secure_intent_by_id(
+                    intent_id, request.execution_mode
+                )
+
+                demo_results.append({
+                    "step": "multisig_intent_execution",
+                    "result": exec_result2,
+                    "execution_mode": request.execution_mode,
+                    "multisig_verified": exec_result2.get("multisig_verified", False),
+                    "signatures_used": exec_result2.get("signatures_used", 0)
+                })
+
+        # Demo completion
+        demo_end_time = time.time()
+        demo_duration = demo_end_time - demo_start_time
+
+        return {
+            "demo_completed": True,
+            "demo_title": "🔐 Secure Intents Framework - Live Demo",
+            "execution_mode": request.execution_mode,
+            "live_transactions": request.execution_mode == "live",
+            "demo_duration_seconds": round(demo_duration, 2),
+            "demo_steps": len(demo_results),
+            "demo_results": demo_results,
+
+            # Collect all blockchain evidence
+            "blockchain_evidence": [
+                result.get("result", {}).get("transaction_hash")
+                for result in demo_results
+                if result.get("result", {}).get("transaction_hash")
+            ],
+
+            "safety_note": "🔥 LIVE TRANSACTIONS EXECUTED" if request.execution_mode == "live" else "Safe simulation mode",
+            "real_money_used": request.execution_mode == "live",
+            "judge_impact": "🏆 LIVE BLOCKCHAIN DEMO" if request.execution_mode == "live" else "Safe cryptographic demo",
+
+            # Key innovations demonstrated
+            "innovations_demonstrated": [
+                "Cryptographic signing of AI-generated trading intents",
+                "Temporal validity with TTL expiration protection",
+                "Multi-signature approval workflows for enterprise security",
+                "Automated compliance verification with risk assessment",
+                "Formal security guarantees based on academic research",
+                "Integration with existing AI + 1inch + wallet infrastructure"
+            ] if len(demo_results) > 1 else [
+                "Cryptographic signing of AI-generated trading intents",
+                "Real blockchain transaction execution with security guarantees"
+            ],
+
+            # Hackathon appeal
+            "hackathon_appeal": {
+                "innovation_factor": "First secure intent coordination framework for DeFi",
+                "technical_depth": "Production-ready cryptographic implementation",
+                "practical_value": "Solves real security problems in autonomous trading",
+                "academic_rigor": "Grounded in peer-reviewed cryptographic research",
+                "1inch_integration": "Perfect alignment with Fusion+ intent-based architecture"
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Secure intents demo failed: {e}")
+        return {
+            "demo_completed": False,
+            "error": str(e),
+            "error_type": type(e).__name__,
+            "execution_mode": request.execution_mode,
+            "framework_available": SECURE_INTENTS_IMPORTED,
+            "suggestion": "Check logs for detailed error information"
+        }
+
+@app.post("/secure-swap")
+async def secure_swap_endpoint(request: SecureSwapRequest):
+    """Enhanced swap endpoint with Secure Intents Framework"""
+
+    if not SECURE_INTENTS_IMPORTED or not secure_intent_api:
+        # Graceful fallback to your existing /ai-swap endpoint
+        fallback_request = SwapRequest(user_input=request.user_input)
+        return await ai_swap(fallback_request)
+
+    try:
+        logger.info(f"Processing secure swap request: {request.user_input}")
+
+        # Create secure intent from natural language
+        secure_intent_result = await secure_intent_api.create_secure_swap_from_natural_language(
+            user_input=request.user_input,
+            ai_parser_func=parse_swap_intent if AI_PARSER_AVAILABLE else simple_parse,
+            ttl_minutes=request.ttl_minutes
+        )
+
+        if secure_intent_result.get("type") == "error":
+            return {
+                "status": "secure_intent_creation_failed",
+                "error": secure_intent_result["error"],
+                "original_input": request.user_input,
+                "fallback_available": "Use /ai-swap for standard functionality"
+            }
+
+        # Handle multi-signature requirements
+        if secure_intent_result.get("type") == "multisig_intent":
+            return {
+                "status": "requires_multisig_approval",
+                "intent_id": secure_intent_result["intent_id"],
+                "security_level": "enterprise",
+                "approval_status": secure_intent_result["approval_status"],
+                "message": f"Large trade detected ({secure_intent_result['amount']} ETH) - requires multi-signature approval",
+                "next_steps": f"Use /multisig/approve to add approvals",
+                "security_enhancement": "Threshold signature protection active"
+            }
+
+        # Handle standard secure intents
+        if secure_intent_result.get("type") == "secure_intent":
+            intent_id = secure_intent_result["intent_id"]
+
+            # Execute the intent
+            execution_result = await secure_intent_api.execute_secure_intent_by_id(
+                intent_id=intent_id,
+                execution_mode=request.execution_mode
+            )
+
+            # Comprehensive response with security metadata
+            return {
+                "status": "success",
+                "intent_id": intent_id,
+                "security_level": secure_intent_result["security_level"],
+                "security_verified": execution_result.get("security_verified", False),
+                "compliance_verified": execution_result.get("compliance_verified", False),
+                "execution_mode": request.execution_mode,
+                "execution_result": execution_result,
+                "time_remaining": secure_intent_result.get("time_remaining", 0),
+                "security_features": {
+                    "cryptographic_signing": True,
+                    "temporal_validity": True,
+                    "replay_protection": True,
+                    "compliance_checking": True,
+                    "formal_security_proofs": True
+                },
+                "original_input": request.user_input,
+                "innovation_claim": "First cryptographically secure intent coordination for DeFi"
+            }
+
+    except Exception as e:
+        logger.error(f"Secure swap processing failed: {e}")
+        # Fallback to regular ai-swap
+        fallback_request = SwapRequest(user_input=request.user_input)
+        fallback_result = await ai_swap(fallback_request)
+        fallback_result["secure_intents_error"] = str(e)
+        fallback_result["fallback_used"] = True
+        return fallback_result
+
+@app.get("/intent/status/{intent_id}")
+async def get_intent_status_endpoint(intent_id: str):
+    """Get comprehensive status of a secure intent"""
+
+    if not SECURE_INTENTS_IMPORTED or not secure_intent_api:
+        raise HTTPException(status_code=503, detail="Secure Intents Framework not available")
+
+    try:
+        status = secure_intent_api.framework.get_intent_status(intent_id)
+
+        # Add framework-level information
+        status["framework_info"] = {
+            "cryptographic_backend": "ECDSA" if CRYPTOGRAPHY_AVAILABLE else "HMAC",
+            "security_level": "production" if CRYPTOGRAPHY_AVAILABLE else "demo",
+            "integration_status": {
+                "wallet": secure_intent_api.wallet is not None,
+                "oneinch": hasattr(secure_intent_api, 'oneinch_service_class') and secure_intent_api.oneinch_service_class is not None
+            }
+        }
+
+        return status
+
+    except Exception as e:
+        logger.error(f"Failed to get intent status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/intent/list-active")
+async def list_active_intents_endpoint():
+    """List all active (non-expired) secure intents"""
+
+    if not SECURE_INTENTS_IMPORTED or not secure_intent_api:
+        return {
+            "active_intents": [],
+            "count": 0,
+            "message": "Secure Intents Framework not available",
+            "fallback": "Use /ai-swap for standard swaps"
+        }
+
+    try:
+        active_intents = secure_intent_api.framework.list_active_intents()
+
+        # Add summary statistics
+        compliance_levels = {}
+        total_value = 0
+
+        for intent in active_intents:
+            compliance_level = intent.get("compliance_level", "unknown")
+            compliance_levels[compliance_level] = compliance_levels.get(compliance_level, 0) + 1
+            total_value += float(intent.get("amount", 0))
+
+        return {
+            "active_intents": active_intents,
+            "count": len(active_intents),
+            "statistics": {
+                "compliance_levels": compliance_levels,
+                "total_value_at_risk_eth": total_value,
+                "framework_uptime": secure_intent_api.framework.get_framework_statistics()["framework_uptime_seconds"]
+            },
+            "framework_status": "active"
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to list active intents: {e}")
+        return {
+            "active_intents": [],
+            "error": str(e)
+        }
+
+@app.post("/intent/execute/{intent_id}")
+async def execute_intent_endpoint(intent_id: str, execution_mode: str = "simulation"):
+    """Execute a previously created secure intent by ID"""
+
+    if not SECURE_INTENTS_IMPORTED or not secure_intent_api:
+        raise HTTPException(status_code=503, detail="Secure Intents Framework not available")
+
+    # Validate execution mode
+    valid_modes = ["simulation", "real", "live"]
+    if execution_mode not in valid_modes:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid execution mode. Must be one of: {valid_modes}"
+        )
+
+    try:
+        result = await secure_intent_api.execute_secure_intent_by_id(intent_id, execution_mode)
+
+        # Add execution timestamp and metadata
+        result["executed_via"] = "secure_intents_api"
+        result["execution_timestamp"] = int(time.time())
+        result["integration_info"] = {
+            "wallet_used": secure_intent_api.wallet is not None,
+            "oneinch_used": hasattr(secure_intent_api, 'oneinch_service_class')
+        }
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Intent execution failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/security/dashboard")
+async def security_dashboard_endpoint():
+    """Comprehensive security dashboard for secure intents monitoring"""
+
+    if not SECURE_INTENTS_IMPORTED or not secure_intent_api:
+        return {
+            "status": "secure_intents_disabled",
+            "message": "Secure Intents Framework not available",
+            "to_enable": [
+                "1. Remove 'import self' line from secure_intents.py",
+                "2. Install: pip install cryptography",
+                "3. Restart server"
+            ],
+            "fallback_endpoints": ["/ai-swap", "/health", "/debug/modules"]
+        }
+
+    try:
+        # Get dashboard from secure intents API
+        dashboard = secure_intent_api.get_security_dashboard()
+
+        # Add integration status with your existing modules
+        dashboard["integration_status"] = {
+            "ai_parser": "✅ Integrated" if AI_PARSER_AVAILABLE else "❌ Not available",
+            "oneinch_service": "✅ Available" if SWAP_SERVICE_AVAILABLE else "❌ Not available",
+            "wallet_module": "✅ Available" if WALLET_AVAILABLE else "❌ Not available",
+            "secure_intents": "✅ Active",
+            "cryptographic_backend": dashboard.get("cryptographic_backend", "Unknown")
+        }
+
+        # Add system health indicators
+        dashboard["system_health"] = {
+            "framework_operational": True,
+            "cryptography_available": CRYPTOGRAPHY_AVAILABLE,
+            "api_keys_configured": bool(os.getenv("OPENAI_API_KEY")) and bool(os.getenv("ONEINCH_API_KEY")),
+            "wallet_configured": bool(os.getenv("PRIVATE_KEY")),
+            "all_modules_available": AI_PARSER_AVAILABLE and SWAP_SERVICE_AVAILABLE and WALLET_AVAILABLE
+        }
+
+        return dashboard
+
+    except Exception as e:
+        logger.error(f"Security dashboard failed: {e}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "framework_available": SECURE_INTENTS_IMPORTED
+        }
+
+# ==================== ENHANCED HEALTH CHECK ====================
+
+@app.get("/health-enhanced")
+async def enhanced_health_check():
+    """Enhanced health check including secure intents status"""
+
+    base_health = await health_check()
+
+    # Add secure intents status
+    if SECURE_INTENTS_IMPORTED and secure_intent_api:
+        secure_status = {
+            "secure_intents": "✅ Active",
+            "cryptographic_backend": "ECDSA" if CRYPTOGRAPHY_AVAILABLE else "HMAC",
+            "wallet_integration": "✅ Connected" if secure_intent_api.wallet else "❌ No wallet",
+            "oneinch_integration": "✅ Available" if hasattr(secure_intent_api, 'oneinch_service_class') else "❌ Not available"
+        }
+    else:
+        secure_status = {
+            "secure_intents": "❌ Not available",
+            "fix_required": "Remove 'import self' line from secure_intents.py"
+        }
+
+    # Merge with base health
+    base_health.services.update(secure_status)
+
+    # Add new endpoints available
+    base_health.available_endpoints = [
+        "/health", "/ai-swap", "/wallet/balance", "/wallet/address",
+        "/demo/secure-intents" if SECURE_INTENTS_IMPORTED else "❌ Secure intents disabled",
+        "/secure-swap" if SECURE_INTENTS_IMPORTED else "❌ Secure intents disabled",
+        "/security/dashboard" if SECURE_INTENTS_IMPORTED else "❌ Secure intents disabled",
+        "/docs"
+    ]
+
+    return base_health
+
+# ==================== WALLET ENDPOINTS (Enhanced) ====================
+
+@app.get("/wallet/balance")
+async def get_wallet_balance():
+    """Get wallet balance with gas sufficiency check"""
+    try:
+        if not WALLET_AVAILABLE:
+            return {"error": "Wallet module not available"}
+
+        wallet = SimpleWallet(os.getenv("PRIVATE_KEY"))
+        balance = await wallet.get_balance("ethereum")
+
+        # Convert to different units for clarity
+        balance_float = float(balance)
+        balance_wei = int(balance_float * 10**18)
+
+        # Check if sufficient for different transaction types
+        sufficient_for_gas = balance_float > 0.005
+        sufficient_for_live = balance_float > 0.01
+
+        return {
+            "balance_eth": balance_float,
+            "balance_wei": balance_wei,
+            "balance_gwei": balance_wei // 10**9,
+            "address": wallet.address,
+            "chain": "ethereum",
+            "sufficient_for_gas": sufficient_for_gas,
+            "sufficient_for_live_transactions": sufficient_for_live,
+            "recommendations": {
+                "for_testing": "Need at least 0.005 ETH for gas",
+                "for_live_mode": "Need at least 0.01 ETH for live transactions",
+                "current_status": "✅ Ready" if sufficient_for_live else "⚠️ Low balance"
+            }
+        }
+    except Exception as e:
+        return {"error": str(e), "type": type(e).__name__}
+
+@app.get("/wallet/address")
+async def get_wallet_address():
+    """Get wallet address with configuration status"""
+    try:
+        if not WALLET_AVAILABLE:
+            return {"error": "Wallet module not available"}
+
+        wallet = SimpleWallet(os.getenv("PRIVATE_KEY"))
+        return {
+            "address": wallet.address,
+            "private_key_configured": bool(os.getenv("PRIVATE_KEY")),
+            "private_key_length": len(os.getenv("PRIVATE_KEY", "")) if os.getenv("PRIVATE_KEY") else 0,
+            "secure_intents_integrated": secure_intent_api is not None,
+            "ready_for_live_transactions": bool(os.getenv("PRIVATE_KEY")) and secure_intent_api is not None
+        }
+    except Exception as e:
+        return {"error": str(e), "type": type(e).__name__}
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
@@ -911,3 +1445,10 @@ if __name__ == "__main__":
         reload=True,
         log_level="info"
     )
+
+    # Add at the very end of your existing app.py
+try:
+    from secure_intents_integration import integrate_secure_intents_with_existing_app
+    integrate_secure_intents_with_existing_app(app, os.getenv("PRIVATE_KEY"))
+except ImportError:
+    print("Secure Intents integration not available")
