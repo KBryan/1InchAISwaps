@@ -77,7 +77,6 @@ class SimpleWallet:
         # Web3 connections cache
         self._web3_connections: Dict[str, Web3] = {}
 
-
     def get_web3_connection(self, chain: str) -> Web3:
         """
         Get Web3 connection for a specific chain
@@ -123,8 +122,6 @@ class SimpleWallet:
             self._web3_connections[chain_lower] = w3
 
         return self._web3_connections[chain_lower]
-
-
 
     def sign_transaction(self, chain: str, transaction_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -315,6 +312,125 @@ class SimpleWallet:
                 "execution_type": "failed"
             }
 
+    async def execute_live_swap(
+            self,
+            transaction_data: Dict[str, Any],
+            chain: str,
+            safety_checks: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Execute a LIVE swap transaction on blockchain - REAL MONEY!
+
+        Args:
+            transaction_data: Real 1inch transaction data
+            chain: Chain name
+            safety_checks: Whether to perform safety validations
+
+        Returns:
+            Live transaction execution result
+        """
+
+        if not self.account:
+            raise ValueError("Wallet not initialized with private key")
+
+        # SAFETY CHECK 1: Validate transaction value
+        if safety_checks:
+            tx_value = self._parse_value(transaction_data.get('value', '0'))
+            max_value = int(0.1 * 10**18)  # 0.1 ETH max
+
+            if tx_value > max_value:
+                raise ValueError(f"Transaction value {tx_value} exceeds safety limit {max_value}")
+
+        # SAFETY CHECK 2: Validate gas price
+        gas_price = self._parse_gas_price(transaction_data.get('gasPrice', '20000000000'))
+        max_gas_price = int(50 * 10**9)  # 50 gwei max
+
+        if safety_checks and gas_price > max_gas_price:
+            raise ValueError(f"Gas price {gas_price} exceeds safety limit {max_gas_price}")
+
+        try:
+            # Step 1: Sign the transaction
+            logger.warning("🚨 PREPARING LIVE BLOCKCHAIN TRANSACTION")
+            signed_result = self.sign_transaction(chain, transaction_data)
+
+            if not signed_result.get("success"):
+                raise Exception(f"Transaction signing failed: {signed_result.get('error')}")
+
+            real_tx_hash = signed_result["transaction_hash"]
+            signed_tx = signed_result["signed_transaction"]
+
+            # Step 2: BROADCAST TO BLOCKCHAIN
+            logger.warning("🚨 BROADCASTING TO BLOCKCHAIN - REAL MONEY TRANSACTION!")
+            broadcast_result = await self.broadcast_transaction(chain, signed_tx)
+
+            if broadcast_result.get("success"):
+                logger.info(f"✅ LIVE TRANSACTION BROADCASTED: {real_tx_hash}")
+
+                return {
+                    "transaction_hash": real_tx_hash,
+                    "status": "broadcasted_live",
+                    "explorer_url": broadcast_result["explorer_url"],
+                    "success": True,
+                    "is_mock": False,
+                    "execution_type": "live_blockchain",
+                    "warning": "REAL MONEY TRANSACTION - CANNOT BE REVERSED"
+                }
+            else:
+                raise Exception(f"Broadcast failed: {broadcast_result.get('error')}")
+
+        except Exception as e:
+            logger.error(f"Live transaction execution failed: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "execution_type": "live_failed"
+            }
+
+    async def wait_for_confirmation_with_status(
+            self,
+            chain: str,
+            tx_hash: str,
+            confirmations: int = 1,
+            timeout: int = 300
+    ) -> Dict[str, Any]:
+        """
+        Wait for live transaction confirmation with status updates
+        """
+        try:
+            w3 = self.get_web3_connection(chain)
+
+            logger.info(f"⏳ Waiting for transaction confirmation: {tx_hash}")
+
+            # Wait for transaction receipt
+            receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=timeout)
+
+            # Check if transaction was successful
+            success = receipt.status == 1
+
+            if success:
+                logger.info(f"✅ TRANSACTION CONFIRMED: {tx_hash}")
+            else:
+                logger.error(f"❌ TRANSACTION FAILED: {tx_hash}")
+
+            return {
+                "success": success,
+                "transaction_hash": tx_hash,
+                "block_number": receipt.blockNumber,
+                "gas_used": receipt.gasUsed,
+                "status": "confirmed_success" if success else "confirmed_failed",
+                "receipt": dict(receipt),
+                "explorer_url": self._get_explorer_url(chain, tx_hash)
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to wait for confirmation: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "status": "confirmation_timeout",
+                "transaction_hash": tx_hash
+            }
+
     def _get_explorer_url(self, chain: str, tx_hash: str) -> str:
         """Get blockchain explorer URL for transaction"""
 
@@ -467,6 +583,11 @@ async def test_wallet():
             exec_result = await wallet.execute_real_swap(mock_tx_data, "ethereum", broadcast=False)
             print(f"✅ Execution result: {exec_result}")
 
+            # Test live swap execution (this should now work!)
+            print("\n🚀 Testing live swap execution...")
+            live_result = await wallet.execute_live_swap(mock_tx_data, "ethereum", safety_checks=True)
+            print(f"✅ Live swap result: {live_result}")
+
         else:
             print(f"❌ Transaction signing failed: {signed_result.get('error')}")
     else:
@@ -475,6 +596,19 @@ async def test_wallet():
         # Test with generated wallet
         test_wallet = SimpleWallet(new_wallet['private_key'])
         print(f"✅ Test wallet: {test_wallet.address}")
+
+        # Test the execute_live_swap method with generated wallet
+        mock_tx_data = {
+            "to": "0x1111111254EEB25477B68fb85Ed929f73A960582",
+            "data": "0x12345678",
+            "value": "0",
+            "gas": "250000",
+            "gasPrice": "20000000000"
+        }
+
+        print("\n🚀 Testing live swap with generated wallet...")
+        live_result = await test_wallet.execute_live_swap(mock_tx_data, "ethereum", safety_checks=True)
+        print(f"✅ Live swap result: {live_result}")
 
 if __name__ == "__main__":
     asyncio.run(test_wallet())

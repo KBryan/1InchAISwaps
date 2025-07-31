@@ -170,15 +170,17 @@ async def test_ai_parser(request: SwapRequest):
 # COMPLETE FIXED SECTION - Replace in app.py
 
 @app.post("/ai-swap", response_model=SwapResponse)
+@app.post("/ai-swap", response_model=SwapResponse)
 async def ai_swap(request: SwapRequest):
     """
-    Main swap endpoint - COMPLETELY FIXED VERSION
-    Now uses REAL 1inch transaction data instead of mock data
+    Main swap endpoint - LIVE BROADCASTING VERSION
+    Supports simulation, real signing, and live blockchain execution
     """
 
     debug_info = {
         "steps_completed": [],
         "warnings": [],
+        "execution_mode": "unknown",
         "modules_available": {
             "ai_parser": AI_PARSER_AVAILABLE,
             "swap_service": SWAP_SERVICE_AVAILABLE,
@@ -191,7 +193,7 @@ async def ai_swap(request: SwapRequest):
         debug_info["original_request"] = request.user_input
         debug_info["steps_completed"].append("request_received")
 
-        # Phase 1: Parse Intent
+        # Phase 1: Parse Intent (UNCHANGED - working perfectly)
         try:
             if AI_PARSER_AVAILABLE:
                 parsed_intent_data = await parse_swap_intent(request.user_input)
@@ -224,7 +226,7 @@ async def ai_swap(request: SwapRequest):
                 amount="1.0"
             )
 
-        # Phase 2: Get Quote
+        # Phase 2: Get Quote (UNCHANGED - working perfectly)
         try:
             if SWAP_SERVICE_AVAILABLE:
                 async with OneinchService() as oneinch:
@@ -263,14 +265,14 @@ async def ai_swap(request: SwapRequest):
                 is_mock=True
             )
 
-        # Phase 3: Build Transaction - FIXED TO USE REAL DATA
+        # Phase 3: Build & Execute Transaction - UPDATED WITH LIVE BROADCASTING
         try:
             if WALLET_AVAILABLE:
                 wallet = SimpleWallet()
                 if wallet.address:
                     debug_info["wallet_address"] = wallet.address
 
-                    # FIXED: Build REAL transaction with 1inch
+                    # Build transaction with 1inch (UNCHANGED - working)
                     if SWAP_SERVICE_AVAILABLE:
                         async with OneinchService() as oneinch:
                             tx_data = await oneinch.build_transaction(
@@ -295,24 +297,47 @@ async def ai_swap(request: SwapRequest):
                         }
                         debug_info["warnings"].append("Using mock transaction data (swap service unavailable)")
 
-                    # FIXED: Use real transaction data for signing
-                    transaction_info = await create_real_transaction_fixed(
-                        wallet, parsed_intent, quote_info, tx_data
+                    # NEW: Determine execution mode
+                    execution_mode = determine_execution_mode(tx_data, debug_info)
+                    debug_info["execution_mode"] = execution_mode
+
+                    # NEW: Execute based on mode
+                    if execution_mode == "live":
+                        debug_info["warnings"].append("🚨 EXECUTING LIVE BLOCKCHAIN TRANSACTION")
+                        transaction_result = await execute_live_transaction(wallet, tx_data, parsed_intent.from_chain)
+
+                    elif execution_mode == "simulation":
+                        debug_info["warnings"].append("🔄 SIMULATION MODE - Real data, no broadcast")
+                        transaction_result = await execute_simulation_transaction(wallet, tx_data, parsed_intent, debug_info)
+
+                    else:  # mock mode
+                        debug_info["warnings"].append("📋 MOCK TRANSACTION MODE")
+                        transaction_result = await execute_mock_transaction(parsed_intent, quote_info, wallet.address)
+
+                    # Create transaction info from result
+                    transaction_info = TransactionInfo(
+                        hash=transaction_result.get("transaction_hash"),
+                        explorer_url=transaction_result.get("explorer_url"),
+                        status=transaction_result.get("status", "unknown"),
+                        is_mock=transaction_result.get("is_mock", True),
+                        execution_mode=execution_mode
                     )
-                    debug_info["steps_completed"].append("real_transaction_created")
+
+                    debug_info["steps_completed"].append("transaction_execution_completed")
                 else:
-                    transaction_info = create_mock_transaction(parsed_intent)
+                    transaction_info = await execute_mock_transaction(parsed_intent, quote_info, None)
                     debug_info["warnings"].append("No wallet configured - using mock transaction")
-                    debug_info["steps_completed"].append("mock_transaction_created")
+                    debug_info["execution_mode"] = "mock_no_wallet"
             else:
-                transaction_info = create_mock_transaction(parsed_intent)
+                transaction_info = await execute_mock_transaction(parsed_intent, quote_info, None)
                 debug_info["warnings"].append("Wallet service not available - using mock transaction")
-                debug_info["steps_completed"].append("mock_transaction_created")
+                debug_info["execution_mode"] = "mock_no_service"
 
         except Exception as e:
             logger.error(f"Transaction creation failed: {e}")
             debug_info["warnings"].append(f"Transaction error: {str(e)}")
-            transaction_info = create_mock_transaction(parsed_intent)
+            transaction_info = await execute_mock_transaction(parsed_intent, quote_info, None)
+            debug_info["execution_mode"] = "error_fallback"
 
         debug_info["steps_completed"].append("all_phases_completed")
 
@@ -334,6 +359,201 @@ async def ai_swap(request: SwapRequest):
             error=f"Internal server error: {str(e)}",
             debug_info=debug_info
         )
+
+# NEW SUPPORTING FUNCTIONS:
+
+def determine_execution_mode(tx_data: Dict[str, Any], parsed_intent: ParsedIntent, debug_info: Dict[str, Any]) -> str:
+    """
+    Determine execution mode: live, simulation, or mock
+    """
+    # Check if we have real transaction data
+    has_real_tx_data = tx_data.get("is_real_transaction", False)
+    has_private_key = bool(os.getenv("PRIVATE_KEY"))
+    live_mode_enabled = os.getenv("ENABLE_REAL_TRANSACTIONS", "false").lower() == "true"
+
+    # Basic requirements
+    if not has_private_key:
+        debug_info["warnings"].append("No private key - using mock mode")
+        return "mock"
+
+    if not has_real_tx_data:
+        debug_info["warnings"].append("No real transaction data - using mock mode")
+        return "mock"
+
+    # If live mode not enabled, use simulation
+    if not live_mode_enabled:
+        debug_info["warnings"].append("Live transactions disabled - using simulation")
+        return "simulation"
+
+    # Safety checks for live mode
+    try:
+        # Check transaction value limit
+        tx_value = int(tx_data.get('value', '0'))
+        max_value_eth = float(os.getenv("MAX_TRANSACTION_VALUE_ETH", "0.01"))
+        max_value_wei = int(max_value_eth * 10**18)
+
+        if tx_value > max_value_wei:
+            debug_info["warnings"].append(f"Transaction value {tx_value} exceeds limit {max_value_wei}")
+            return "simulation"
+
+        # Check gas price limit
+        gas_price = int(tx_data.get('gasPrice', '20000000000'))
+        max_gas_price = int(float(os.getenv("MAX_GAS_PRICE_GWEI", "50")) * 10**9)
+
+        if gas_price > max_gas_price:
+            debug_info["warnings"].append(f"Gas price {gas_price} exceeds limit {max_gas_price}")
+            return "simulation"
+
+        # Check amount limit
+        amount_float = float(parsed_intent.amount)
+        max_amount = float(os.getenv("MAX_SWAP_AMOUNT_ETH", "0.1"))
+
+        if amount_float > max_amount:
+            debug_info["warnings"].append(f"Swap amount {amount_float} exceeds limit {max_amount}")
+            return "simulation"
+
+        # All safety checks passed
+        debug_info["warnings"].append("🚨 All safety checks passed - LIVE MODE ENABLED")
+        return "live"
+
+    except Exception as e:
+        debug_info["warnings"].append(f"Safety check error: {str(e)} - using simulation")
+        return "simulation"
+
+async def execute_live_transaction(
+        wallet: SimpleWallet,
+        tx_data: Dict[str, Any],
+        parsed_intent: ParsedIntent,
+        debug_info: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Execute LIVE transaction with blockchain broadcasting - REAL MONEY!
+    """
+    try:
+        logger.warning("🚨 STARTING LIVE BLOCKCHAIN TRANSACTION")
+
+        # Step 1: Sign the transaction
+        signed_result = wallet.sign_transaction(parsed_intent.from_chain, tx_data)
+
+        if not signed_result.get("success"):
+            raise Exception(f"Transaction signing failed: {signed_result.get('error')}")
+
+        real_tx_hash = signed_result["transaction_hash"]
+        signed_tx = signed_result["signed_transaction"]
+
+        logger.warning(f"🚨 BROADCASTING TRANSACTION: {real_tx_hash}")
+
+        # Step 2: BROADCAST TO BLOCKCHAIN
+        broadcast_result = await wallet.broadcast_transaction(parsed_intent.from_chain, signed_tx)
+
+        if broadcast_result.get("success"):
+            logger.warning(f"✅ LIVE TRANSACTION BROADCASTED: {real_tx_hash}")
+
+            # Optional: Wait for confirmation
+            wait_for_confirmation = os.getenv("WAIT_FOR_CONFIRMATION", "false").lower() == "true"
+
+            if wait_for_confirmation:
+                logger.info("⏳ Waiting for blockchain confirmation...")
+                confirmation_result = await wallet.wait_for_confirmation(
+                    parsed_intent.from_chain, real_tx_hash, confirmations=1, timeout=300
+                )
+
+                return {
+                    "transaction_hash": real_tx_hash,
+                    "status": "confirmed_live" if confirmation_result.get("success") else "failed_live",
+                    "explorer_url": broadcast_result["explorer_url"],
+                    "is_mock": False,
+                    "execution_type": "live_blockchain",
+                    "confirmation": confirmation_result,
+                    "warning": "REAL MONEY TRANSACTION - EXECUTED ON BLOCKCHAIN"
+                }
+            else:
+                return {
+                    "transaction_hash": real_tx_hash,
+                    "status": "broadcasted_live",
+                    "explorer_url": broadcast_result["explorer_url"],
+                    "is_mock": False,
+                    "execution_type": "live_blockchain",
+                    "warning": "REAL MONEY TRANSACTION - EXECUTED ON BLOCKCHAIN"
+                }
+        else:
+            raise Exception(f"Broadcast failed: {broadcast_result.get('error')}")
+
+    except Exception as e:
+        logger.error(f"Live transaction execution failed: {e}")
+        debug_info["warnings"].append(f"Live execution failed: {str(e)}")
+
+        # Fall back to simulation
+        return await execute_simulation_transaction(wallet, tx_data, parsed_intent, debug_info)
+async def execute_simulation_transaction(
+        wallet: SimpleWallet,
+        tx_data: Dict[str, Any],
+        parsed_intent: ParsedIntent,
+        debug_info: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Execute simulation transaction - signs but doesn't broadcast
+    """
+    try:
+        logger.info("📋 Executing simulation transaction (safe mode)")
+
+        # Sign the real transaction but don't broadcast
+        signed_result = wallet.sign_transaction(parsed_intent.from_chain, tx_data)
+
+        if signed_result.get("success"):
+            real_tx_hash = signed_result["transaction_hash"]
+
+            return {
+                "transaction_hash": real_tx_hash,
+                "status": "real_signed_not_broadcasted",
+                "explorer_url": wallet._get_explorer_url(parsed_intent.from_chain, real_tx_hash),
+                "is_mock": False,
+                "execution_type": "simulation",
+                "note": "Real transaction signed but not broadcasted for safety"
+            }
+        else:
+            raise Exception(f"Simulation signing failed: {signed_result.get('error')}")
+
+    except Exception as e:
+        logger.error(f"Simulation execution failed: {e}")
+        debug_info["warnings"].append(f"Simulation failed: {str(e)}")
+
+        # Fall back to mock
+        return await execute_mock_transaction(parsed_intent, None, wallet.address)
+
+async def execute_mock_transaction(
+        parsed_intent: ParsedIntent,
+        quote_info: Optional[QuoteInfo],
+        wallet_address: Optional[str]
+) -> Dict[str, Any]:
+    """
+    Execute mock transaction for testing
+    """
+    # Generate realistic mock hash
+    if wallet_address:
+        hash_input = f"{wallet_address}{parsed_intent.from_token}{parsed_intent.to_token}{time.time()}"
+    else:
+        hash_input = f"mock{parsed_intent.from_token}{parsed_intent.to_token}{time.time()}"
+
+    mock_hash = "0x" + hashlib.sha256(hash_input.encode()).hexdigest()
+
+    # Get explorer URL
+    explorers = {
+        "ethereum": "https://etherscan.io/tx/",
+        "arbitrum": "https://arbiscan.io/tx/",
+        "polygon": "https://polygonscan.com/tx/"
+    }
+
+    explorer_base = explorers.get(parsed_intent.from_chain, "https://etherscan.io/tx/")
+
+    return {
+        "transaction_hash": mock_hash,
+        "status": "mock_pending",
+        "explorer_url": f"{explorer_base}{mock_hash}",
+        "is_mock": True,
+        "execution_type": "mock",
+        "note": "Mock transaction for testing purposes"
+    }
 
 async def create_real_transaction_fixed(
         wallet,
@@ -604,6 +824,83 @@ def get_explorer_url(chain: str, tx_hash: str) -> str:
 
     base_url = explorers.get(chain.lower(), "https://etherscan.io/tx/")
     return f"{base_url}{tx_hash}"
+
+def determine_execution_mode(tx_data: Dict[str, Any], debug_info: Dict[str, Any]) -> str:
+    """
+    UPDATED: Determine whether to use real or mock transaction execution
+    """
+    has_real_tx_data = tx_data.get("is_real_transaction", False)
+    has_private_key = bool(os.getenv("PRIVATE_KEY"))
+    real_mode_enabled = os.getenv("ENABLE_REAL_TRANSACTIONS", "false").lower() == "true"
+
+    # Safety checks
+    if not has_private_key:
+        debug_info["warnings"].append("No private key available")
+        return "mock"
+
+    if not has_real_tx_data:
+        debug_info["warnings"].append("Transaction data is mock/incomplete")
+        return "mock"
+
+    if not real_mode_enabled:
+        debug_info["warnings"].append("Real transactions disabled in environment")
+        return "simulation"
+
+    # NEW: Check for safety limits
+    tx_value = int(tx_data.get('value', '0'))
+    max_value = int(float(os.getenv("MAX_TRANSACTION_VALUE_ETH", "0.1")) * 10**18)
+
+    if tx_value > max_value:
+        debug_info["warnings"].append(f"Transaction value exceeds safety limit")
+        return "simulation"
+
+    # All checks passed - LIVE MODE
+    debug_info["warnings"].append("🚨 LIVE BLOCKCHAIN EXECUTION ENABLED")
+    return "live"
+
+async def execute_live_transaction(
+        wallet: SimpleWallet,
+        tx_data: Dict[str, Any],
+        chain: str
+) -> Dict[str, Any]:
+    """
+    Execute LIVE transaction with confirmation waiting
+    """
+    try:
+        # Execute live transaction
+        execution_result = await wallet.execute_live_swap(tx_data, chain, safety_checks=True)
+
+        if execution_result.get("success"):
+            tx_hash = execution_result["transaction_hash"]
+
+            # Wait for confirmation (optional)
+            confirmation_enabled = os.getenv("WAIT_FOR_CONFIRMATION", "true").lower() == "true"
+
+            if confirmation_enabled:
+                logger.info("⏳ Waiting for blockchain confirmation...")
+                confirmation_result = await wallet.wait_for_confirmation_with_status(
+                    chain, tx_hash, confirmations=1, timeout=300
+                )
+
+                # Merge results
+                execution_result.update({
+                    "confirmation": confirmation_result,
+                    "final_status": confirmation_result.get("status", "unknown")
+                })
+
+            return execution_result
+        else:
+            raise Exception(f"Live execution failed: {execution_result.get('error')}")
+
+    except Exception as e:
+        logger.error(f"Live transaction failed: {e}")
+        return {
+            "transaction_hash": None,
+            "status": "live_execution_failed",
+            "success": False,
+            "error": str(e),
+            "execution_type": "live_failed"
+        }
 
 if __name__ == "__main__":
     import uvicorn
