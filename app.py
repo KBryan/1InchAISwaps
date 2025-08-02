@@ -904,13 +904,6 @@ async def execute_live_transaction(
 
 try:
     from secure_intents import SecureIntentAPI, generate_demo_agent_key, CRYPTOGRAPHY_AVAILABLE
-    from secure_intents_integration import (
-        SecureSwapRequest,
-        IntentStatusRequest,
-        MultiSigApprovalRequest,
-        initialize_secure_intents,
-        SECURE_INTENTS_AVAILABLE
-    )
     SECURE_INTENTS_IMPORTED = True
     print("✅ Secure Intents Framework imported successfully")
 except ImportError as e:
@@ -942,6 +935,11 @@ class DemoRequest(BaseModel):
     execution_mode: str = Field(default="simulation", description="simulation, real, or live")
     enable_live_transactions: bool = Field(default=False, description="Enable actual blockchain broadcasting")
     demo_amount: str = Field(default="0.001", description="Amount for demo (use small amounts for live)")
+
+class SecureSwapRequest(BaseModel):
+    user_input: str = Field(..., example="Swap 1 ETH to USDC")
+    ttl_minutes: int = Field(default=5, ge=1, le=60, description="Intent validity in minutes")
+    execution_mode: str = Field(default="simulation", description="simulation, real, or live")
 
 # ==================== SECURE INTENTS ENDPOINTS ====================
 

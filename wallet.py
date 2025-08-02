@@ -435,14 +435,14 @@ class SimpleWallet:
         """Get blockchain explorer URL for transaction"""
 
         explorers = {
-            "ethereum": "https://etherscan.io/tx/",
-            "arbitrum": "https://arbiscan.io/tx/",
-            "polygon": "https://polygonscan.com/tx/",
-            "optimism": "https://optimistic.etherscan.io/tx/",
-            "base": "https://basescan.org/tx/"
+            "ethereum": "https://etherscan.io/tx/0x",
+            "arbitrum": "https://arbiscan.io/tx/0x",
+            "polygon": "https://polygonscan.com/tx/0x",
+            "optimism": "https://optimistic.etherscan.io/tx/0x",
+            "base": "https://basescan.org/tx/0x"
         }
 
-        base_url = explorers.get(chain.lower(), "https://etherscan.io/tx/")
+        base_url = explorers.get(chain.lower(), "https://etherscan.io/tx/0x")
         return f"{base_url}{tx_hash}"
 
     # UPDATED Mock functions for compatibility

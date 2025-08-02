@@ -17,7 +17,6 @@ from typing import Dict, Any, Optional, Tuple, List, Callable
 from dataclasses import dataclass, asdict
 from enum import Enum
 
-# REMOVED: import self  ← This was causing the AttributeError!
 
 # Try to import cryptography, fall back to basic implementation if not available
 try:
@@ -375,14 +374,14 @@ class SecureIntentAPI:
             logger.error(f"1inch integration failed: {e}")
             self.oneinch_service_class = None
 
-# Utility functions for integration
+    # Utility functions for integration
 
-def generate_demo_agent_key() -> bytes:
-    """Generate a demo agent private key for testing"""
-    demo_seed = f"secure_intents_demo_{int(time.time())}"
-    return hashlib.sha256(demo_seed.encode()).digest()
+    def generate_demo_agent_key(self) -> bytes:
+        """Generate a demo agent private key for testing"""
+        demo_seed = f"secure_intents_demo_{int(time.time())}"
+        return hashlib.sha256(demo_seed.encode()).digest()
 
-def create_mock_signature(data: str, signer_id: str) -> str:
-    """Create a mock signature for multi-sig testing"""
-    signature_input = f"{data}_{signer_id}_{int(time.time())}"
-    return hashlib.sha256(signature_input.encode()).hexdigest()
+    def create_mock_signature(data: str, signer_id: str) -> str:
+        """Create a mock signature for multi-sig testing"""
+        signature_input = f"{data}_{signer_id}_{int(time.time())}"
+        return hashlib.sha256(signature_input.encode()).hexdigest()
