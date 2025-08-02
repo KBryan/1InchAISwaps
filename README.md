@@ -98,7 +98,7 @@ curl -X POST "http://localhost:8000/ai-swap" \
 import requests
 
 response = requests.post("http://localhost:8000/ai-swap", 
-    json={"user_input": "Swap 1 ETH to USDC on Arbitrum"})
+    json={"user_input": "Swap 0.0001 ETH to USDC on Ethereum"})
 print(response.json())
 ```
 
