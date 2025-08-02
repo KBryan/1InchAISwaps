@@ -1,12 +1,35 @@
+# Cross-Chain Swap Assistant
 
-<img width="512" height="512" alt="nexusintent" src="https://github.com/user-attachments/assets/b452c9fb-4bc6-447f-ae05-51857928268d" />
+## AI Swaps + 1inch API Integration
 
+![nexusintent](https://github.com/user-attachments/assets/b452c9fb-4bc6-447f-ae05-51857928268d)
 
-# 🚀 Quick Reference Card
+The Cross-Chain Swap Assistant allows users to initiate DeFi swaps using **plain English commands**. Powered by **GPT-4** and the **1inch Fusion+ API**, it transforms natural language into fully executable blockchain transactions across chains.
+
+## How it Works
+
+1.  **AI Intent Parser**: GPT-4 parses phrases like “Swap 1 ETH to USDC on Arbitrum” into structured JSON swap instructions.
+2.  **Quote Engine**: The backend queries 1inch `/quote` to get estimated output, gas costs, and execution time.
+3.  **Transaction Builder**: Uses 1inch `/swap` endpoint to construct ready-to-sign transaction data.
+4.  **Wallet Execution**: Transactions are signed and broadcast using the in-app wallet module.
+
+## Secure Intents (Optional)
+
+For delegated execution and agent interoperability, Secure Intents:
+
+* Sign swap data using EIP-712
+* Include TTLs and optional encryption
+* Enable trustless AI agent coordination
+
+Great for voice wallets, bots, or DAO-controlled swap flows.
+
+---
+
+## Quick Reference Card
 
 **Cross-Chain Swap Assistant - Essential Commands & API Usage**
 
-## 🏃‍♂️ Quick Start (30 seconds)
+## Quick Start (30 seconds)
 
 ```bash
 # 1. Run automated setup
@@ -19,9 +42,10 @@
 ./test_api.sh
 ```
 
-## 🔧 Essential Commands
+## Essential Commands
 
 ### Server Management
+
 ```bash
 # Start server
 uvicorn app:app --reload --host 0.0.0.0 --port 8000
@@ -34,6 +58,7 @@ uvicorn app:app --host 0.0.0.0 --port 8000 --workers 4
 ```
 
 ### Testing & Demo
+
 ```bash
 # Health check
 curl http://localhost:8000/health
@@ -48,18 +73,19 @@ python3 demo/hackathon_demo.py
 python3 demo/hackathon_demo.py --quick
 ```
 
-## 🌐 API Endpoints
+## API Endpoints
 
-| Method | Endpoint | Purpose |
-|--------|----------|---------|
-| GET | `/` | System info |
-| GET | `/health` | Health check |
-| POST | `/ai-swap` | Main swap endpoint |
-| GET | `/docs` | Interactive docs |
+| Method | Endpoint   | Purpose            |
+| ------ | ---------- | ------------------ |
+| GET    | `/`        | System info        |
+| GET    | `/health`  | Health check       |
+| POST   | `/ai-swap` | Main swap endpoint |
+| GET    | `/docs`    | Interactive docs   |
 
-## 📝 API Usage Examples
+## API Usage Examples
 
 ### Basic Swap Request
+
 ```bash
 curl -X POST "http://localhost:8000/ai-swap" \
      -H "Content-Type: application/json" \
@@ -67,6 +93,7 @@ curl -X POST "http://localhost:8000/ai-swap" \
 ```
 
 ### Python Example
+
 ```python
 import requests
 
@@ -76,6 +103,7 @@ print(response.json())
 ```
 
 ### JavaScript Example
+
 ```javascript
 fetch('http://localhost:8000/ai-swap', {
     method: 'POST',
@@ -86,40 +114,39 @@ fetch('http://localhost:8000/ai-swap', {
 .then(console.log);
 ```
 
-## 🎯 Natural Language Examples
+## Natural Language Examples
 
 ### Cross-Chain Swaps
-- `"Swap 1 ETH to USDC on Arbitrum"`
-- `"Convert 0.1 BTC to ETH"`
-- `"Exchange 100 USDC for MATIC on Polygon"`
+
+* "Swap 1 ETH to USDC on Arbitrum"
+* "Convert 0.1 BTC to ETH"
+* "Exchange 100 USDC for MATIC on Polygon"
 
 ### Conversational Style
-- `"I want to trade my 0.5 ETH for some USDT please"`
-- `"Can you swap 2 ETH to DAI?"`
-- `"Trade 1000 USDC for ARB tokens"`
+
+* "I want to trade my 0.5 ETH for some USDT please"
+* "Can you swap 2 ETH to DAI?"
+* "Trade 1000 USDC for ARB tokens"
 
 ### Same-Chain Swaps
-- `"Swap 1 ETH for USDT"`
-- `"Convert 500 DAI to USDC"`
-- `"Exchange ETH for 1000 USDT"`
 
-## 🔑 Environment Variables
+* "Swap 1 ETH for USDT"
+* "Convert 500 DAI to USDC"
+* "Exchange ETH for 1000 USDT"
+
+## Environment Variables
 
 ### Required
+
 ```env
 OPENAI_API_KEY=sk-your-key-here
-```
-
-### Optional
-```env
 ONEINCH_API_KEY=your-1inch-key
 PRIVATE_KEY=your-testnet-private-key
 ETHEREUM_RPC_URL=your-rpc-endpoint
-ARBITRUM_RPC_URL=your-arbitrum-rpc
-POLYGON_RPC_URL=your-polygon-rpc
+
 ```
 
-## 📊 Response Format
+## Response Format
 
 ```json
 {
@@ -145,30 +172,31 @@ POLYGON_RPC_URL=your-polygon-rpc
 }
 ```
 
-## 🌐 Supported Networks
+## Supported Networks
 
-| Network | Chain ID | Status |
-|---------|----------|--------|
-| Ethereum | 1 | ✅ |
-| Arbitrum | 42161 | ✅ |
-| Polygon | 137 | ✅ |
-| Bitcoin | - | ✅ (Cross-chain) |
+| Network  | Chain ID | Status          |
+| -------- | -------- | --------------- |
+| Ethereum | 1        | ✅               |
+| Arbitrum | 42161    | ✅               |
+| Polygon  | 137      | ✅               |
+| Bitcoin  | -        | ✅ (Cross-chain) |
 
-## 🪙 Supported Tokens
+## Supported Tokens
 
-| Token | Networks | Type |
-|-------|----------|------|
-| ETH | Ethereum, Arbitrum | Native |
-| BTC | Bitcoin → Others | Cross-chain |
-| USDC | All | Stablecoin |
-| USDT | All | Stablecoin |
-| MATIC | Polygon | Native |
-| DAI | Ethereum, Polygon | Stablecoin |
-| ARB | Arbitrum | Governance |
+| Token | Networks           | Type        |
+| ----- | ------------------ | ----------- |
+| ETH   | Ethereum, Arbitrum | Native      |
+| BTC   | Bitcoin → Others   | Cross-chain |
+| USDC  | All                | Stablecoin  |
+| USDT  | All                | Stablecoin  |
+| MATIC | Polygon            | Native      |
+| DAI   | Ethereum, Polygon  | Stablecoin  |
+| ARB   | Arbitrum           | Governance  |
 
-## 🔧 Troubleshooting
+## Troubleshooting
 
 ### Common Issues
+
 ```bash
 # Server won't start
 pip3 install -r requirements.txt
@@ -184,6 +212,7 @@ tail -f server.log
 ```
 
 ### Debug Commands
+
 ```bash
 # Test components individually
 python3 -c "import asyncio; from ai_parser import test_ai_parser; asyncio.run(test_ai_parser())"
@@ -191,15 +220,15 @@ python3 -c "import asyncio; from swap_service import test_oneinch_service; async
 python3 -c "import asyncio; from wallet import test_wallet; asyncio.run(test_wallet())"
 ```
 
-## 📚 Documentation Links
+## Documentation Links
 
-- **Interactive API Docs**: http://localhost:8000/docs
-- **ReDoc**: http://localhost:8000/redoc
-- **Complete Tutorial**: [TUTORIAL.md](TUTORIAL.md)
-- **Project README**: [README.md](README.md)
-- **Project Summary**: [PROJECT_SUMMARY.md](PROJECT_SUMMARY.md)
+* **Interactive API Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
+* **ReDoc**: [http://localhost:8000/redoc](http://localhost:8000/redoc)
+* **Complete Tutorial**: [TUTORIAL.md](TUTORIAL.md)
+* **Project README**: [README.md](README.md)
+* **Project Summary**: [PROJECT\_SUMMARY.md](PROJECT_SUMMARY.md)
 
-## 🎬 Demo Commands
+## Demo Commands
 
 ```bash
 # Health check only
@@ -215,7 +244,7 @@ python3 demo/hackathon_demo.py
 python3 demo/demo.py
 ```
 
-## 🚀 Production Deployment
+## Production Deployment
 
 ```bash
 # Using Gunicorn
@@ -229,16 +258,17 @@ docker run -p 8000:8000 --env-file .env swap-assistant
 
 ---
 
-**💡 Pro Tips:**
-- Always start with health check: `curl http://localhost:8000/health`
-- Use interactive docs for testing: http://localhost:8000/docs
-- Check server logs if issues occur: `tail -f server.log`
-- Run demo scripts to verify functionality
-- Keep your OpenAI API key secure and never commit to git
+## Pro Tips:
 
-**🆘 Need Help?**
+* Always start with health check: `curl http://localhost:8000/health`
+* Use interactive docs for testing: [http://localhost:8000/docs](http://localhost:8000/docs)
+* Check server logs if issues occur: `tail -f server.log`
+* Run demo scripts to verify functionality
+* Keep your OpenAI API key secure and never commit to git
+
+## Need Help?
+
 1. Check [TUTORIAL.md](TUTORIAL.md) for detailed instructions
 2. Review [README.md](README.md) for complete documentation
 3. Run `python3 demo/hackathon_demo.py --health` to verify setup
 4. Check server logs for detailed error messages
-
