@@ -1,3 +1,7 @@
+
+<img width="512" height="512" alt="nexusintent" src="https://github.com/user-attachments/assets/b452c9fb-4bc6-447f-ae05-51857928268d" />
+
+
 # 🚀 Quick Reference Card
 
 **Cross-Chain Swap Assistant - Essential Commands & API Usage**
